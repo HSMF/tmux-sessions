@@ -59,12 +59,14 @@ impl CommandExt for Command {
         let now = SystemTime::now();
         let o = self.output()?;
         let s = String::from_utf8(o.stdout)?;
-        let time = now.elapsed().unwrap_or_default().as_secs_f64();
-        Timings::get()
-            .by_location
-            .entry((caller.file(), caller.line()))
-            .or_insert(Info::read())
-            .push(time);
+        if cfg!(feature = "timings") {
+            let time = now.elapsed().unwrap_or_default().as_secs_f64();
+            Timings::get()
+                .by_location
+                .entry((caller.file(), caller.line()))
+                .or_insert(Info::read())
+                .push(time);
+        }
         Ok(s)
     }
 
@@ -73,12 +75,14 @@ impl CommandExt for Command {
         let caller = std::panic::Location::caller();
         let now = SystemTime::now();
         let ret = self.spawn()?.wait()?;
-        let time = now.elapsed().unwrap_or_default().as_secs_f64();
-        Timings::get()
-            .by_location
-            .entry((caller.file(), caller.line()))
-            .or_insert(Info::discard())
-            .push(time);
+        if cfg!(feature = "timings") {
+            let time = now.elapsed().unwrap_or_default().as_secs_f64();
+            Timings::get()
+                .by_location
+                .entry((caller.file(), caller.line()))
+                .or_insert(Info::discard())
+                .push(time);
+        }
         Ok(ret)
     }
 }
@@ -278,23 +282,17 @@ impl Ctx {
     }
 
     fn dump_panes_raw(&mut self) -> anyhow::Result<String> {
-        Ok(String::from_utf8(
-            self.tmux()
-                .args(["list-panes", "-a", "-F"])
-                .arg(self.pane_format())
-                .output()?
-                .stdout,
-        )?)
+        self.tmux()
+            .args(["list-panes", "-a", "-F"])
+            .arg(self.pane_format())
+            .output_string()
     }
 
     fn dump_windows_raw(&mut self) -> anyhow::Result<String> {
-        Ok(String::from_utf8(
-            self.tmux()
-                .args(["list-windows", "-a", "-F"])
-                .arg(self.window_format())
-                .output()?
-                .stdout,
-        )?)
+        self.tmux()
+            .args(["list-windows", "-a", "-F"])
+            .arg(self.window_format())
+            .output_string()
     }
 
     fn dump_panes(&mut self) -> anyhow::Result<()> {
@@ -332,9 +330,7 @@ impl Ctx {
             .args(["show-window-options", "-vt"])
             .arg(format!("{session_name}:{window_index}"))
             .arg("automatic-rename")
-            .output()?
-            .stdout;
-        let automatic_rename = String::from_utf8(automatic_rename)?;
+            .output_string()?;
         if automatic_rename.is_empty() {
             Ok(None)
         } else {
@@ -373,8 +369,8 @@ impl Ctx {
             .tmux()
             .args(["display-message", "-p"])
             .arg(self.state_format())
-            .output()?;
-        self.f.write_all(&o.stdout)?;
+            .output_string()?;
+        self.f.write_all(o.as_bytes())?;
         Ok(())
     }
 }
@@ -400,35 +396,37 @@ fn main() -> anyhow::Result<()> {
             ctx.restore()?;
         }
     }
-    let timings = Timings::get().by_location.clone();
-    let mut means: Vec<_> = timings
-        .iter()
-        .map(|(loc, Info(need_result, timings))| {
-            let total: f64 = timings.iter().sum();
-            let mean = total / timings.len() as f64;
-            let stddev = timings
-                .iter()
-                .map(|x| (x - mean).powi(2))
-                .sum::<f64>()
-                .sqrt();
-            let min = timings
-                .iter()
-                .min_by(|a, b| f64::total_cmp(a, b))
-                .unwrap_or(&f64::INFINITY);
-            let max = timings
-                .iter()
-                .max_by(|a, b| f64::total_cmp(a, b))
-                .unwrap_or(&f64::NEG_INFINITY);
-            let count = timings.len();
-            (loc, total, need_result, mean, stddev, min, max, count)
-        })
-        .collect();
-    means.sort_by(|a, b| a.1.total_cmp(&b.1));
 
-    for ((file, line), _total, need_result, mean, stddev, min, max, count) in means {
-        let need_result = if *need_result { "R" } else { " " };
-        println!("{file}:{line} {need_result}\t x {count}\t{mean}±{stddev} [{min}..{max}]");
+    if cfg!(feature = "timings") {
+        let timings = Timings::get().by_location.clone();
+        let mut means: Vec<_> = timings
+            .iter()
+            .map(|(loc, Info(need_result, timings))| {
+                let total: f64 = timings.iter().sum();
+                let mean = total / timings.len() as f64;
+                let stddev = timings
+                    .iter()
+                    .map(|x| (x - mean).powi(2))
+                    .sum::<f64>()
+                    .sqrt();
+                let min = timings
+                    .iter()
+                    .min_by(|a, b| f64::total_cmp(a, b))
+                    .unwrap_or(&f64::INFINITY);
+                let max = timings
+                    .iter()
+                    .max_by(|a, b| f64::total_cmp(a, b))
+                    .unwrap_or(&f64::NEG_INFINITY);
+                let count = timings.len();
+                (loc, total, need_result, mean, stddev, min, max, count)
+            })
+            .collect();
+        means.sort_by(|a, b| a.1.total_cmp(&b.1));
+
+        for ((file, line), _total, need_result, mean, stddev, min, max, count) in means {
+            let need_result = if *need_result { "R" } else { " " };
+            println!("{file}:{line} {need_result}\t x {count}\t{mean}±{stddev} [{min}..{max}]");
+        }
     }
-
     Ok(())
 }
