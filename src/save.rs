@@ -1,11 +1,12 @@
 use std::io::Write;
-use std::{fmt::Display, fs::File, process::Command};
+use std::{fmt::Display, process::Command};
 
-use crate::{App, read_ifs, save_command_strategies::Ps};
+use crate::Tmux;
+use crate::{read_ifs, save_command_strategies::Ps};
 
-pub struct Ctx {
-    cli: App,
-    f: File,
+pub struct Ctx<F> {
+    f: F,
+    tmux: Tmux,
     save_command_strategy: Ps,
     delimiter: &'static str,
 }
@@ -19,12 +20,15 @@ fn format_str(parts: &[&str]) -> String {
     ret
 }
 
-struct Line<'a> {
-    ctx: &'a mut Ctx,
+struct Line<'a, F> {
+    ctx: &'a mut Ctx<F>,
     need_delim: bool,
 }
 
-impl Line<'_> {
+impl<F> Line<'_, F>
+where
+    F: Write,
+{
     fn write(&mut self, item: impl Display) -> anyhow::Result<()> {
         if self.need_delim {
             write!(self.ctx.f, "{}", self.ctx.delimiter)?;
@@ -40,26 +44,24 @@ impl Line<'_> {
     }
 }
 
-impl Ctx {
-    pub fn new(cli: App) -> anyhow::Result<Self> {
-        let f = File::create(&cli.file)?;
+impl<F> Ctx<F>
+where
+    F: Write,
+{
+    pub fn new(f: F, tmux: Tmux) -> anyhow::Result<Self> {
         Ok(Self {
-            cli,
             f,
+            tmux,
             save_command_strategy: Ps::new(),
             delimiter: "\t",
         })
     }
 
     fn tmux(&self) -> Command {
-        let mut c = Command::new("tmux");
-        if let Some(socket) = &self.cli.socket_name {
-            c.arg("-L").arg(socket);
-        }
-        c
+        self.tmux.tmux()
     }
 
-    fn line(&mut self) -> Line<'_> {
+    fn line(&mut self) -> Line<'_, F> {
         Line {
             ctx: self,
             need_delim: false,
@@ -261,7 +263,7 @@ impl Ctx {
     }
 }
 
-pub fn save_all(ctx: &mut Ctx) -> anyhow::Result<()> {
+pub fn save_all<F: Write>(ctx: &mut Ctx<F>) -> anyhow::Result<()> {
     ctx.fetch_and_dump_grouped_sessions()?;
     ctx.dump_panes()?;
     ctx.dump_windows()?;

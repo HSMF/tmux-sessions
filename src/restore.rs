@@ -1,8 +1,8 @@
-use std::{borrow::Cow, process::Command};
+use std::{borrow::Cow, path::Path, process::Command};
 
 use anyhow::Result;
 
-use crate::{App, CommandExt};
+use crate::{CommandExt, Tmux};
 
 #[derive(Debug)]
 struct ExistingPane {
@@ -12,7 +12,7 @@ struct ExistingPane {
 }
 
 pub struct Ctx {
-    cli: App,
+    tmux: Tmux,
     existing_panes: Vec<ExistingPane>,
     restoring_from_scratch: bool,
     restore_pane_contents: bool,
@@ -100,10 +100,10 @@ impl<'a> Iterator for Panes<'a> {
 }
 
 impl Ctx {
-    pub fn new(cli: App) -> Result<Self> {
-        let resurrect_state = std::fs::read_to_string(&cli.file)?;
+    pub fn new(file: &Path, tmux: Tmux) -> Result<Self> {
+        let resurrect_state = std::fs::read_to_string(file)?;
         Ok(Ctx {
-            cli,
+            tmux,
             delimiter: "\t",
             existing_panes: vec![],
             restoring_from_scratch: false,
@@ -140,11 +140,7 @@ fn remove_first_char(s: &str) -> &str {
 
 impl Ctx {
     fn tmux(&self) -> Command {
-        let mut c = Command::new("tmux");
-        if let Some(socket) = &self.cli.socket_name {
-            c.arg("-L").arg(socket);
-        }
-        c
+        self.tmux.tmux()
     }
 
     fn detect_if_restoring_from_scratch(&self) -> Result<bool> {
