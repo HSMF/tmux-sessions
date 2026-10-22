@@ -112,7 +112,7 @@ impl Ctx {
             resurrect_state,
             restore_list: [
                 "vi", "vim", "view", "nvim", "emacs", "man", "less", "more", "tail", "top", "htop",
-                "irssi", "weechat", "mutt",
+                "irssi", "weechat", "mutt", "kibi",
             ]
             .into_iter()
             .map(|x| x.to_owned())
@@ -182,7 +182,6 @@ impl Ctx {
             dir,
             ..
         } = Pane::new(line, self.delimiter)?;
-        eprintln!("restoring pane {session_name}:{window_number}.{pane_index}");
         let dir = remove_first_char(dir);
         let dir = self.resolve_dir(dir);
         if session_name == "0" {
